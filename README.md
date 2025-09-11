@@ -73,7 +73,6 @@ Finally, these EchoMask folder should be orgnized as follows:
 ├── weights
 │   ├── pretrained_vq
 │   ├── smplx_models
-│   ├── best_echomask.bin
 │   └── best_echomask.bin
 ├── ae_trainer.py
 ├── aeface_trainer.py
