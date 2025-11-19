@@ -167,10 +167,11 @@ Thanks to [EMAGE](https://github.com/PantoMatrix/PantoMatrix/tree/main/scripts/E
 If you find our code or paper helps, please consider citing:
 
 ```bibtex
-@article{zhang2025echomask,
+@inproceedings{zhang2025echomask,
   title={EchoMask: Speech-Queried Attention-based Mask Modeling for Holistic Co-Speech Motion Generation},
   author={Zhang, Xiangyue and Li, Jianfang and Zhang, Jiaxu and Ren, Jianqiang and Bo, Liefeng and Tu, Zhigang},
-  journal={arXiv preprint arXiv:2504.09209},
+  booktitle={Proceedings of the 33rd ACM International Conference on Multimedia},
+  pages={10827--10836},
   year={2025}
 }
 ```
