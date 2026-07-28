@@ -53,23 +53,40 @@ class Processor:
         import importlib
         
         self.args = args
+        self.verbose = bool(getattr(args, "verbose", False))
         # === TODO(2): bind your VQ models & encode_text ===
         rvq_model_module = __import__(f"models.rvq", fromlist=["something"])
         self.args.vae_test_dim = 106 # face
-        self.vq_model_face = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_face, "./weights/pretrained_vq/rvq_face_600.bin", "vq_face")
+        self.vq_model_face = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_face,
+            os.path.join(args.pretrained_vq_dir, "rvq_face_600.bin"),
+            "vq_face",
+        )
 
         self.args.vae_test_dim = 78 # upper body
-        self.vq_model_upper = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_upper, "./weights/pretrained_vq/rvq_upper_500.bin", "vq_upper")
+        self.vq_model_upper = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_upper,
+            os.path.join(args.pretrained_vq_dir, "rvq_upper_500.bin"),
+            "vq_upper",
+        )
 
         self.args.vae_test_dim = 180 # hands
-        self.vq_model_hands = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_hands, "./weights/pretrained_vq/rvq_hands_500.bin", "vq_hands")
+        self.vq_model_hands = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_hands,
+            os.path.join(args.pretrained_vq_dir, "rvq_hands_500.bin"),
+            "vq_hands",
+        )
         
         self.args.vae_test_dim = 61 # lower body
-        self.vq_model_lower = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_lower, "./weights/pretrained_vq/rvq_lower_600.bin", "vq_lower")
+        self.vq_model_lower = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_lower,
+            os.path.join(args.pretrained_vq_dir, "rvq_lower_600.bin"),
+            "vq_lower",
+        )
         
         self.ori_joint_list = joints_list[self.args.ori_joints]
         self.tar_joint_list_face = joints_list["beat_smplx_face"]
@@ -97,7 +114,7 @@ class Processor:
         self.vq_model_hands.eval()
         self.vq_model_lower.eval()
         self.rop_matrix = self._load_or_create_projection_matrix(
-            rop_file="weights/rop_1024_256.pt", 
+            rop_file=args.rop_path,
             in_dim=1024,
             out_dim=256,
             seed=42
@@ -176,21 +193,19 @@ class Processor:
         j = self.joints
         in_hubert = in_hubert @ self.rop_matrix  # [B,N,256]
         hubert_hid = hubert_hid @ self.rop_matrix  # [B,N,256]
-        print('tar_pose_raw:', tar_pose_raw.shape)
-        print('tar_pose:', tar_pose.shape)
-        print('tar_contact:', tar_contact.shape)
-        print("tar_trans:", tar_trans.shape)
-        print("tar_exps:", tar_exps.shape)
-        print("in_audio:", in_audio.shape)
-        print("in_hubert:", in_hubert.shape)
-        print("in_beat:", in_beat.shape)
-        print("in_word:", in_word)
-        # print("in_sentence:", in_sentence)
-        # print("in_emo:", in_emo)    
-        print("tar_beta:", tar_beta.shape)
-        print("tar_id:", tar_id.shape)
-        # print("in_sem:", in_sem.shape)
-        print("hubert_hid:", hubert_hid.shape)
+        if self.verbose:
+            print("tar_pose_raw:", tar_pose_raw.shape)
+            print("tar_pose:", tar_pose.shape)
+            print("tar_contact:", tar_contact.shape)
+            print("tar_trans:", tar_trans.shape)
+            print("tar_exps:", tar_exps.shape)
+            print("in_audio:", in_audio.shape)
+            print("in_hubert:", in_hubert.shape)
+            print("in_beat:", in_beat.shape)
+            print("in_word:", in_word.shape)
+            print("tar_beta:", tar_beta.shape)
+            print("tar_id:", tar_id.shape)
+            print("hubert_hid:", hubert_hid.shape)
         # print("mode:", mode)
         # print("B,N:", B,N)
         # print("joints:", j)
@@ -372,6 +387,9 @@ def main():
     ap.add_argument("--tar_joints", default="beat_smplx_full", help="target joints for dataset")
     ap.add_argument("--data_path_1", default="./weights/", help="original data path for dataset")
     ap.add_argument("--data_path", default="./BEAT2/beat_english_v2.0.0/", help="cache data path for dataset")
+    ap.add_argument("--hubert_path", default="facebook/hubert-large-ls960-ft")
+    ap.add_argument("--pretrained_vq_dir", default="./weights/pretrained_vq")
+    ap.add_argument("--rop_path", default="./weights/rop_1024_256.pt")
     ap.add_argument("--root_path", default="./", help="root path for dataset")
     ap.add_argument("--cache_path", default="./datasets/beat2_cache2/", help="cache path for dataset")
     ap.add_argument("--word_rep", default="textgrid", help="word representation for dataset")
@@ -383,6 +401,8 @@ def main():
     ap.add_argument("--clean_first_seconds", default=0, type=int)
     ap.add_argument("--clean_final_seconds", default=0, type=int)
     ap.add_argument("--additional_data", default=False, type=bool)
+    ap.add_argument("--file_shard_index", default=0, type=int)
+    ap.add_argument("--file_shard_count", default=1, type=int)
     ap.add_argument("--dst_lmdb", default="./datasets/beat2_echomask_train/" ,help="Destination LMDB directory")
     ap.add_argument("--batch_size", type=int, default=1)
     ap.add_argument("--vae_test_dim", type=int, default=128) 
@@ -391,10 +411,18 @@ def main():
     ap.add_argument("--commit-interval", type=int, default=2048)
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--mode", default="train", choices=["train", "val", "test"])
+    ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
-    
-    train_data = __import__(f"dataloaders.{args.dataset}", fromlist=["something"]).CustomDataset(args, "train")
+    if os.path.isdir(args.dst_lmdb):
+        n = _lmdb_entries(args.dst_lmdb)
+        if n > 0:
+            print(f"[Skip] LMDB 已存在且非空：{args.dst_lmdb}（{n} entries）。不再处理源数据。")
+            return
+
+    train_data = __import__(
+        f"dataloaders.{args.dataset}", fromlist=["something"]
+    ).CustomDataset(args, "train")
     loader = DataLoader(
         train_data,
         batch_size=args.batch_size,
@@ -404,13 +432,6 @@ def main():
         drop_last=False,
         collate_fn=getattr(train_data, "collate_fn", None)
     )
-
-    # === 如果目标 LMDB 已存在且非空，直接退出 ===
-    if os.path.isdir(args.dst_lmdb):
-        n = _lmdb_entries(args.dst_lmdb)
-        if n > 0:
-            print(f"[Skip] LMDB 已存在且非空：{args.dst_lmdb}（{n} entries）。不再处理源数据。")
-            return
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     processor = Processor(device=device, args=args)
 

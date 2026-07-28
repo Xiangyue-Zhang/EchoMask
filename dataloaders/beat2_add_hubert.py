@@ -14,7 +14,6 @@ from loguru import logger
 from collections import defaultdict
 from torch.utils.data import Dataset
 import torch.distributed as dist
-import pyarrow
 import librosa
 import smplx
 import torch.nn.functional as F
@@ -47,15 +46,16 @@ class CustomDataset(Dataset):
         self.loader_type = loader_type
         if self.args.addHubert:
             from transformers import Wav2Vec2Processor, HubertModel
+            hubert_path = getattr(
+                self.args, "hubert_path", "facebook/hubert-large-ls960-ft"
+            )
             print("Loading the Wav2Vec2 Processor...")
-            self.wav2vec2_processor = Wav2Vec2Processor.from_pretrained("facebook/hubert-large-ls960-ft")
+            self.wav2vec2_processor = Wav2Vec2Processor.from_pretrained(
+                hubert_path
+            )
             print("Loading the HuBERT Model...")
-            self.hubert_model = HubertModel.from_pretrained("facebook/hubert-large-ls960-ft")
-            # self.hubert_model.cuda()
-            if loader_type == "test":
-                self.hubert_model.eval().cuda()
-            else:
-                self.hubert_model.cuda()
+            self.hubert_model = HubertModel.from_pretrained(hubert_path)
+            self.hubert_model.eval().cuda()
         # self.rank = dist.get_rank()
         self.ori_stride = self.args.stride
         self.ori_length = self.args.pose_length
@@ -98,6 +98,17 @@ class CustomDataset(Dataset):
             logger.warning(f"{loader_type} is empty for speaker {self.args.training_speakers}, use train set 0-8 instead")
             self.selected_file = split_rule.loc[(split_rule['type'] == 'train') & (split_rule['id'].str.split("_").str[0].astype(int).isin(self.args.training_speakers))]
             self.selected_file = self.selected_file.iloc[0:8]
+        shard_count = int(getattr(self.args, "file_shard_count", 1))
+        shard_index = int(getattr(self.args, "file_shard_index", 0))
+        if shard_count < 1 or not 0 <= shard_index < shard_count:
+            raise ValueError(
+                f"invalid file shard {shard_index}/{shard_count}; "
+                "expected 0 <= index < count"
+            )
+        if shard_count > 1:
+            self.selected_file = self.selected_file.iloc[
+                shard_index::shard_count
+            ].copy()
         self.data_dir = args.data_path 
         
         if loader_type == "test": 
@@ -726,20 +737,22 @@ class CustomDataset(Dataset):
                 start_idx = clip_length * i
                 end_idx = start_idx + (clip_length - stride + kernel)
             input_values = input_values_all[:, start_idx: end_idx]
-            hidden_states = hubert_model.forward(input_values).last_hidden_state  # [B=1, T=pts//320, hid=1024]
-            true_hidden = hubert_model.forward(input_values,output_hidden_states=True).hidden_states
-            hid_list.append(true_hidden[11][0])
-            res_lst.append(hidden_states[0])
+            outputs = hubert_model.forward(
+                input_values, output_hidden_states=True
+            )
+            hid_list.append(outputs.hidden_states[11][0])
+            res_lst.append(outputs.last_hidden_state[0])
         if num_iter > 0:
             input_values = input_values_all[:, clip_length * num_iter:]
         else:
             input_values = input_values_all
         # if input_values.shape[1] != 0:
         if input_values.shape[1] >= kernel:  # if the last batch is shorter than kernel_size, skip it
-            hidden_states = hubert_model(input_values).last_hidden_state  # [B=1, T=pts//320, hid=1024]
-            true_hidden = hubert_model.forward(input_values,output_hidden_states=True).hidden_states
-            hid_list.append(true_hidden[11][0])
-            res_lst.append(hidden_states[0])
+            outputs = hubert_model.forward(
+                input_values, output_hidden_states=True
+            )
+            hid_list.append(outputs.hidden_states[11][0])
+            res_lst.append(outputs.last_hidden_state[0])
 
         ret = torch.cat(res_lst, dim=0).cpu()  # [T, 1024]
         hid = torch.cat(hid_list, dim=0).cpu()
@@ -774,7 +787,7 @@ class CustomDataset(Dataset):
         #print(pose_each_file.shape)
         round_seconds_skeleton = pose_each_file.shape[0] // self.args.pose_fps  # assume 1500 frames / 15 fps = 100 s
         #print(round_seconds_skeleton)
-        if audio_each_file != []:
+        if len(audio_each_file) > 0:
             if self.args.audio_rep != "wave16k":
                 round_seconds_audio = len(audio_each_file) // self.args.audio_fps # assume 16,000,00 / 16,000 = 100 s
                 round_seconds_audio_beat = beat_audio.shape[0] // 30
@@ -788,7 +801,7 @@ class CustomDataset(Dataset):
                 round_seconds_audio = audio_each_file.shape[0] // self.args.audio_sr
                 if self.args.addHubert:
                     round_seconds_audio_hubert = hubert_feat.shape[0] // 30
-            if facial_each_file != []:
+            if len(facial_each_file) > 0:
                 round_seconds_facial = facial_each_file.shape[0] // self.args.pose_fps
                 logger.info(f"audio: {round_seconds_audio}s, pose: {round_seconds_skeleton}s, facial: {round_seconds_facial}s")
                 # print('round_seconds_skeleton', round_seconds_skeleton)
@@ -836,7 +849,7 @@ class CustomDataset(Dataset):
             logger.info(f"pose from frame {clip_s_f_pose} to {clip_e_f_pose}, length {cut_length}")
             logger.info(f"{num_subdivision} clips is expected with stride {self.args.stride}")
             
-            if audio_each_file != []:
+            if len(audio_each_file) > 0:
                 audio_short_length = math.floor(cut_length / self.args.pose_fps * self.args.audio_fps)
                 """
                 for audio sr = 16000, fps = 15, pose_length = 34, 
@@ -897,7 +910,7 @@ class CustomDataset(Dataset):
                 if sample_pose.any() != None:
                     # filtering motion skeleton data
                     sample_pose, filtering_message = MotionPreprocessor(sample_pose).get()
-                    is_correct_motion = (sample_pose != [])
+                    is_correct_motion = len(sample_pose) > 0
                     if is_correct_motion or disable_filtering:
                         sample_pose_list.append(sample_pose)
                         sample_audio_list.append(sample_audio)
@@ -933,7 +946,7 @@ class CustomDataset(Dataset):
                         sample_trans_list,):
                         k = "{:005}".format(self.n_out_samples).encode("ascii")
                         v = [pose, audio, beat, hubert, hubert_hid, facial, shape, word, emo, sem, vid, trans]
-                        v = pyarrow.serialize(v).to_buffer()
+                        v = pickle.dumps(v, protocol=pickle.HIGHEST_PROTOCOL)
                         txn.put(k, v)
                         self.n_out_samples += 1
         return n_filtered_out
@@ -942,7 +955,13 @@ class CustomDataset(Dataset):
         with self.lmdb_env.begin(write=False) as txn:
             key = "{:005}".format(idx).encode("ascii")
             sample = txn.get(key)
-            sample = pyarrow.deserialize(sample)
+            try:
+                sample = pickle.loads(sample)
+            except Exception:
+                # Keep caches produced by the original pyarrow serializer readable.
+                import pyarrow
+
+                sample = pyarrow.deserialize(sample)
             tar_pose, in_audio, in_beat, in_hubert, in_hubert_hid, in_facial, in_shape, in_word, emo, sem, vid, trans = sample
             #print(in_shape)
             #vid = torch.from_numpy(vid).int()
@@ -979,7 +998,7 @@ class MotionPreprocessor:
         assert (self.skeletons is not None)
 
         # filtering
-        if self.skeletons != []:
+        if len(self.skeletons) > 0:
             if self.check_pose_diff():
                 self.skeletons = []
                 self.filtering_message = "pose"

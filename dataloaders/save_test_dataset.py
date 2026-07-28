@@ -10,6 +10,7 @@ if __package__ is None or __package__ == "":
 
 import argparse
 import io
+import json
 import os
 import pickle
 from typing import Dict, Any, Iterable, Tuple, List
@@ -43,23 +44,40 @@ class Processor:
         import importlib
         
         self.args = args
+        self.verbose = bool(getattr(args, "verbose", False))
         # === TODO(2): bind your VQ models & encode_text ===
         rvq_model_module = __import__(f"models.rvq", fromlist=["something"])
         self.args.vae_test_dim = 106 # face
-        self.vq_model_face = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_face, "./weights/pretrained_vq/rvq_face_600.bin", "vq_face")
+        self.vq_model_face = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_face,
+            os.path.join(args.pretrained_vq_dir, "rvq_face_600.bin"),
+            "vq_face",
+        )
 
         self.args.vae_test_dim = 78 # upper body
-        self.vq_model_upper = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_upper, "./weights/pretrained_vq/rvq_upper_500.bin", "vq_upper")
+        self.vq_model_upper = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_upper,
+            os.path.join(args.pretrained_vq_dir, "rvq_upper_500.bin"),
+            "vq_upper",
+        )
 
         self.args.vae_test_dim = 180 # hands
-        self.vq_model_hands = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_hands, "./weights/pretrained_vq/rvq_hands_500.bin", "vq_hands")
+        self.vq_model_hands = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_hands,
+            os.path.join(args.pretrained_vq_dir, "rvq_hands_500.bin"),
+            "vq_hands",
+        )
         
         self.args.vae_test_dim = 61 # lower body
-        self.vq_model_lower = getattr(rvq_model_module, "RVQVAE")(self.args).to(args.device)
-        other_tools.load_checkpoints(self.vq_model_lower, "./weights/pretrained_vq/rvq_lower_600.bin", "vq_lower")
+        self.vq_model_lower = getattr(rvq_model_module, "RVQVAE")(self.args).to(self.device)
+        other_tools.load_checkpoints(
+            self.vq_model_lower,
+            os.path.join(args.pretrained_vq_dir, "rvq_lower_600.bin"),
+            "vq_lower",
+        )
         
         self.ori_joint_list = joints_list[self.args.ori_joints]
         self.tar_joint_list_face = joints_list["beat_smplx_face"]
@@ -87,7 +105,7 @@ class Processor:
         self.vq_model_hands.eval()
         self.vq_model_lower.eval()
         self.rop_matrix = self._load_or_create_projection_matrix(
-            rop_file="weights/rop_1024_256.pt", 
+            rop_file=args.rop_path,
             in_dim=1024,
             out_dim=256,
             seed=42
@@ -162,23 +180,20 @@ class Processor:
         j = self.joints
         in_hubert = in_hubert @ self.rop_matrix  # [B,N,256]
         hubert_hid = hubert_hid @ self.rop_matrix  # [B,N,256]
-        print('tar_pose_raw:', tar_pose_raw.shape)
-        print('tar_pose:', tar_pose.shape)
-        print('tar_contact:', tar_contact.shape)
-        print("tar_trans:", tar_trans.shape)
-        print("tar_exps:", tar_exps.shape)
-        print("in_audio:", in_audio.shape)
-        print("in_hubert:", in_hubert.shape)
-        print("in_beat:", in_beat.shape)
-        print("in_word:", in_word.shape)
-        # print("in_sentence:", in_sentence)
-        # print("len(in_sentence):", len(in_sentence))
-        # print("in_emo:", in_emo)    
-        print("tar_beta:", tar_beta.shape)
-        print("tar_id:", tar_id.shape)
-        print("hubert_hid:", hubert_hid.shape)
-        # print("mode:", mode)
-        print("B,N:", B,N)
+        if self.verbose:
+            print("tar_pose_raw:", tar_pose_raw.shape)
+            print("tar_pose:", tar_pose.shape)
+            print("tar_contact:", tar_contact.shape)
+            print("tar_trans:", tar_trans.shape)
+            print("tar_exps:", tar_exps.shape)
+            print("in_audio:", in_audio.shape)
+            print("in_hubert:", in_hubert.shape)
+            print("in_beat:", in_beat.shape)
+            print("in_word:", in_word.shape)
+            print("tar_beta:", tar_beta.shape)
+            print("tar_id:", tar_id.shape)
+            print("hubert_hid:", hubert_hid.shape)
+            print("B,N:", B, N)
         # print("joints:", j)
         # exit(0)
         # ---- 文本编码 ----
@@ -338,6 +353,9 @@ def main():
     ap.add_argument("--tar_joints", default="beat_smplx_full", help="target joints for dataset")
     ap.add_argument("--data_path_1", default="./weights/", help="original data path for dataset")
     ap.add_argument("--data_path", default="./BEAT2/beat_english_v2.0.0/", help="cache data path for dataset")
+    ap.add_argument("--hubert_path", default="facebook/hubert-large-ls960-ft")
+    ap.add_argument("--pretrained_vq_dir", default="./weights/pretrained_vq")
+    ap.add_argument("--rop_path", default="./weights/rop_1024_256.pt")
     ap.add_argument("--root_path", default="./", help="root path for dataset")
     ap.add_argument("--cache_path", default="./datasets/beat2_cache2/", help="cache path for dataset")
     ap.add_argument("--word_rep", default="textgrid", help="word representation for dataset")
@@ -349,6 +367,8 @@ def main():
     ap.add_argument("--clean_first_seconds", default=0, type=int)
     ap.add_argument("--clean_final_seconds", default=0, type=int)
     ap.add_argument("--additional_data", default=False, type=bool)
+    ap.add_argument("--file_shard_index", default=0, type=int)
+    ap.add_argument("--file_shard_count", default=1, type=int)
 
     # 改为 pkl 目标路径
     ap.add_argument("--dst_pkl", default="./datasets/beat2_echomask_test.pkl" ,help="Destination pickle file")
@@ -358,6 +378,7 @@ def main():
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--mode", default="test", choices=["train", "val", "test"])
+    ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     # === 如果目标 pkl 已存在则直接退出 ===
     if os.path.isfile(args.dst_pkl):
@@ -390,6 +411,17 @@ def main():
         dst_pkl=args.dst_pkl,
     )
     print(f"Done. Wrote {total} samples to {args.dst_pkl}")
+    sequence_ids = test_data.selected_file["id"].astype(str).tolist()
+    if len(sequence_ids) != total:
+        raise RuntimeError(
+            "Expected one test sample per selected sequence, but got "
+            f"{total} samples for {len(sequence_ids)} sequences"
+        )
+    manifest_path = f"{args.dst_pkl}.manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump({"sequence_ids": sequence_ids}, handle, indent=2)
+        handle.write("\n")
+    print(f"Wrote manifest: {manifest_path}")
 
     # ===== 验证读取：构建最简 Dataset，取第 0 个样本打印 =====
     print("\nVerifying written PKL by reading one sample ...")

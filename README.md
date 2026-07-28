@@ -14,11 +14,35 @@
 
 # 📣 Updates
 
+- **[2026.07.28]** Released the 25-speaker EchoMask checkpoint, reusable
+  All-Speaker representation weights, evaluation metrics, and paired NPZ
+  results.
 - **[2025.09.11]** 🔥 Release: - [✔] Inference code - [✔] Training code
 
 # 💖 Inference Data
 
-If you would like to compare your paper’s results with EchoMask but find it too difficult to run the repository, you can simply download the test `.npz` file from [Google Drive](https://drive.google.com/file/d/1MZQMWf4Vk4DDK73U_WIamDwIeBRzR4Tc/view?usp=sharing).
+The two releases use different training protocols and are provided separately:
+
+- **Speaker 2 (paper protocol):** download the original test `.npz` files from
+  [Google Drive](https://drive.google.com/file/d/1MZQMWf4Vk4DDK73U_WIamDwIeBRzR4Tc/view?usp=sharing).
+- **All Speakers (25 English BEAT2 speakers):** download the paired test
+  `.npz` files from
+  [Google Drive](https://drive.google.com/file/d/1AoOQ-uqqrvlXhvQVX4aC-by5tCApXsjT/view?usp=sharing).
+
+# 📊 Results
+
+| Training protocol | Speakers | FGD ↓ (×10<sup>-1</sup>) | BC ↑ (×10<sup>-1</sup>) | DIV ↑ | MSE ↓ (×10<sup>-8</sup>) | LVD ↓ (×10<sup>-5</sup>) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Speaker 2 (paper) | 1 | **4.623** | **7.738** | **13.370** | 6.761 | 7.290 |
+| All Speakers (released checkpoint) | 25 | 5.656 | 4.951 | 9.299 | **4.700** | **6.090** |
+
+The Speaker 2 row is copied from Table 1 of the
+[paper](https://arxiv.org/abs/2504.09209). The All-Speaker row is measured on
+the released checkpoint selected by a coarse 10-epoch search followed by a
+local 1-epoch search. Raw metrics and checkpoint metadata are in
+[`results/all_speakers`](results/all_speakers). The two rows use different
+training protocols and should not be interpreted as a controlled
+single-speaker versus multi-speaker ablation.
 
 # ⚒️ Quick Start
 
@@ -52,7 +76,24 @@ export HF_ENDPOINT=https://hf-mirror.com
 huggingface-cli download --resume-download facebook/hubert-large-ls960-ft --local-dir facebook/hubert-large-ls960-ft
 ```
 
-Download [pretrained models and weights](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing) from google drive, unzip and place it in the EchoMask folder, i.e. `path-to-EchoMask/weights`.
+Choose the weights that match the intended protocol:
+
+- **Speaker 2 (paper protocol):** download the
+  [original pretrained models and weights](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing).
+- **All Speakers (25 English BEAT2 speakers):** download the
+  [All-Speaker representation models and EchoMask checkpoint](https://drive.google.com/file/d/1TXnR7nNn7_2q_sIXkW-yihYpzTLpES1j/view?usp=sharing).
+  The five representation checkpoints are byte-identical to the verified
+  SemTalk All-Speaker suite; EchoMask reuses them and trains only its own
+  generation network. Keep the original archive's evaluator, projection
+  matrix, and SMPL-X assets in `weights/`.
+
+Keep the original Speaker 2 archive in its documented locations. Install the
+All-Speaker archive without overwriting those files:
+
+```shell
+unzip EchoMask_all_speakers_weights_25spk.zip
+cp -R EchoMask_all_speakers_weights/weights/all_speakers ./weights/
+```
 
 Finally, these EchoMask folder should be orgnized as follows:
 
@@ -75,7 +116,10 @@ Finally, these EchoMask folder should be orgnized as follows:
 ├── weights
 │   ├── pretrained_vq
 │   ├── smplx_models
-│   └── best_echomask.bin
+│   ├── best_echomask.bin
+│   └── all_speakers
+│       ├── pretrained_vq
+│       └── best_echomask.bin
 ├── ae_trainer.py
 ├── aeface_trainer.py
 ├── aelower_trainer.py
@@ -108,9 +152,24 @@ python dataloaders/save_test_dataset.py # generate test dataset
 
 ## Training of EchoMask
 
+The commands below preserve the original Speaker 2 protocol. For the separate
+25-speaker preprocessing, training, checkpoint search, and evaluation
+workflow, see
+[`scripts/all_speakers/README.md`](scripts/all_speakers/README.md).
+
 ### Train RVQ-VAE
 
-You can either train your own RVQ-VAE weights and place them under `path-to-EchoMask/weights` using the commands below, or simply use our [pretrained weights](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing).
+The commands below reproduce the original **Speaker 2** RVQ-VAE protocol. You
+can train the models yourself and place them under `path-to-EchoMask/weights`,
+or download weights that match your training protocol:
+
+- **Speaker 2 (paper protocol):** use the
+  [original pretrained weights](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing).
+- **All Speakers (25 English BEAT2 speakers):** use the
+  [All-Speaker weights](https://drive.google.com/file/d/1TXnR7nNn7_2q_sIXkW-yihYpzTLpES1j/view?usp=sharing).
+  They contain the five shared representation checkpoints under
+  `weights/all_speakers/pretrained_vq` and the selected EchoMask checkpoint.
+  The representation models do not need to be retrained for EchoMask.
 
 ```shell
 torchrun --nproc_per_mode=1 train.py --train_rvq --config configs/cnn_vqvae_face_30.yaml # face

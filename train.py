@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import csv
+import json
 import signal
 import warnings
 import random
@@ -25,7 +26,7 @@ from dataloaders.build_vocab import Vocab
 from optimizers.optim_factory import create_optimizer
 from optimizers.scheduler_factory import create_scheduler
 from optimizers.loss_factory import get_loss_func
-from timm.utils import ModelEma
+from utils.model_ema import ModelEma
 
 
 class BaseTrainer(object):
@@ -34,8 +35,12 @@ class BaseTrainer(object):
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.device = torch.device(f"cuda:{args.local_rank}") if torch.cuda.is_available() else torch.device("cpu")
         self.checkpoint_path = args.out_path + "custom/" + args.name + args.notes + "/"
+        self.needs_evaluation = bool(
+            args.test_state or getattr(args, "eval_during_train", True)
+        )
 
         if self.rank == 0:
+            os.makedirs(self.checkpoint_path, exist_ok=True)
             if self.args.stat == "ts":
                 self.writer = SummaryWriter(log_dir=args.out_path + "custom/" + args.name + args.notes + "/")
             else:
@@ -52,14 +57,16 @@ class BaseTrainer(object):
             self.train_data,
             batch_size=args.batch_size,
             shuffle=False if args.ddp else True,
-            num_workers=0,
+            num_workers=args.loader_workers,
+            pin_memory=True,
+            persistent_workers=args.loader_workers > 0,
             drop_last=True,
             sampler=torch.utils.data.distributed.DistributedSampler(self.train_data) if args.ddp else None,
         )
         self.train_length = len(self.train_loader)
         logger.info("Init train dataloader success")
 
-        if self.rank == 0:
+        if self.rank == 0 and self.needs_evaluation:
             if args.train_rvq:
                 self.test_data = __import__(f"dataloaders.{args.dataset}", fromlist=["something"]).CustomDataset(args, "test")
             else:
@@ -78,12 +85,14 @@ class BaseTrainer(object):
         if args.ddp:
             model_raw = getattr(model_module, args.g_name)(args).to(self.device)
             model_raw = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_raw)
+            static_graph = bool(getattr(args, "static_graph", False))
             self.model = DDP(
                 model_raw,
                 device_ids=[args.local_rank],
                 output_device=args.local_rank,
                 broadcast_buffers=False,
-                find_unused_parameters=True,
+                find_unused_parameters=not static_graph,
+                static_graph=static_graph,
             )
             self.model_ema = ModelEma(model_raw, decay=0.9999)  # 用原始模型创建 EMA
         else:
@@ -118,7 +127,7 @@ class BaseTrainer(object):
             self.opt_d = create_optimizer(args, self.d_model, lr_weight=args.d_lr_weight)
             self.opt_d_s = create_scheduler(args, self.opt_d)
 
-        if args.e_name is not None:
+        if args.e_name is not None and self.needs_evaluation:
             eval_model_module = __import__(f"models.{args.eval_model}", fromlist=["something"])
             if self.args.ddp:
                 self.eval_model = getattr(eval_model_module, args.e_name)(args).to(self.device)
@@ -150,25 +159,30 @@ class BaseTrainer(object):
         self.opt = create_optimizer(args, self.model)
         self.opt_s = create_scheduler(args, self.opt)
 
-        self.smplx = smplx.create(
-            self.args.data_path_1 + "smplx_models/",
-            model_type='smplx',
-            gender='NEUTRAL_2020',
-            use_face_contour=False,
-            num_betas=300,
-            num_expression_coeffs=100,
-            ext='npz',
-            use_pca=False,
-        ).to(self.device).eval()
+        if self.needs_evaluation:
+            self.smplx = smplx.create(
+                self.args.data_path_1 + "smplx_models/",
+                model_type='smplx',
+                gender='NEUTRAL_2020',
+                use_face_contour=False,
+                num_betas=300,
+                num_expression_coeffs=100,
+                ext='npz',
+                use_pca=False,
+            ).to(self.device).eval()
 
         self.alignmenter = metric.alignment(
             0.3,
             7,
             self.train_data.avg_vel,
             upper_body=[3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21
-                        ]) if self.rank == 0 else None
+                        ]) if self.rank == 0 and self.needs_evaluation else None
         self.align_mask = 60
-        self.l1_calculator = metric.L1div() if self.rank == 0 else None
+        self.l1_calculator = (
+            metric.L1div()
+            if self.rank == 0 and self.needs_evaluation
+            else None
+        )
 
     def inverse_selection(self, filtered_t, selection_array, n):
         original_shape_t = np.zeros((n, selection_array.size))
@@ -240,7 +254,60 @@ class BaseTrainer(object):
         _ = self.tracker.update_values(dict_name, 'test', epoch)
 
 
-@logger.catch
+def _atomic_torch_save(states, save_path):
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    tmp_path = f"{save_path}.tmp.{os.getpid()}"
+    torch.save(states, tmp_path)
+    os.replace(tmp_path, save_path)
+
+
+def _save_stage_checkpoint(trainer, save_path, epoch, full_state):
+    states = {
+        "model_state": trainer.model.state_dict(),
+        "epoch": epoch + 1,
+    }
+    if full_state:
+        states.update({
+            "opt_state": trainer.opt.state_dict(),
+            "lrs": trainer.opt_s.state_dict(),
+            "ema_state": trainer.model_ema.state_dict(),
+        })
+        if hasattr(trainer, "scaler"):
+            states["scaler_state"] = trainer.scaler.state_dict()
+    _atomic_torch_save(states, save_path)
+
+
+def _load_stage_checkpoint(trainer, checkpoint_path):
+    states = torch.load(checkpoint_path, map_location="cpu")
+    other_tools.load_checkpoints2(
+        trainer.model,
+        checkpoint_path,
+        "echomask_resume",
+        map_location="cpu",
+    )
+    if "opt_state" in states:
+        trainer.opt.load_state_dict(states["opt_state"])
+    if "lrs" in states:
+        trainer.opt_s.load_state_dict(states["lrs"])
+    if "ema_state" in states:
+        trainer.model_ema.load_state_dict(states["ema_state"])
+    if "scaler_state" in states and hasattr(trainer, "scaler"):
+        trainer.scaler.load_state_dict(states["scaler_state"])
+    return int(states.get("epoch", 0))
+
+
+def _write_json_atomic(path, payload):
+    if not path:
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp_path, path)
+
+
+@logger.catch(reraise=True)
 def main_worker(args):
     if not sys.warnoptions:
         warnings.simplefilter("ignore")
@@ -258,6 +325,10 @@ def main_worker(args):
         logger.warning("WORLD_SIZE<=1，未检测到 torchrun 多进程，自动将 args.ddp 设为 False（单进程训练）。")
         args.ddp = False
     torch.cuda.set_device(local_rank)
+    torch.backends.cuda.matmul.allow_tf32 = bool(args.tf32)
+    torch.backends.cudnn.allow_tf32 = bool(args.tf32)
+    if args.tf32:
+        torch.set_float32_matmul_precision("high")
 
     if args.ddp:
         dist.init_process_group(
@@ -298,14 +369,27 @@ def main_worker(args):
                     other_tools.load_checkpoints2(trainer.model, load_ckpt, "echomask_test")
                     logger.info("Checkpoint loaded successfully")
                     trainer.model.eval()
-                    fid = trainer.test(42)
+                    metrics = trainer.test(args.eval_epoch)
+                    _write_json_atomic(args.metrics_output, metrics)
                 else:
                     logger.warning(f"Checkpoint {load_ckpt} does not exist. Starting training from scratch.")
                     raise FileNotFoundError(f"Checkpoint {load_ckpt} does not exist.")
         return
 
-    logger.info("Training from scratch ...")
-    for epoch in range(args.epochs + 1):
+    start_epoch = 0
+    if args.resume:
+        if not os.path.isfile(args.resume):
+            raise FileNotFoundError(f"Resume checkpoint not found: {args.resume}")
+        start_epoch = _load_stage_checkpoint(trainer, args.resume)
+        if args.resume_epoch >= 0:
+            start_epoch = args.resume_epoch
+        logger.info(
+            f"Resuming from {args.resume} at epoch index {start_epoch}"
+        )
+    else:
+        logger.info("Training from scratch ...")
+
+    for epoch in range(start_epoch, args.epochs + 1):
         if args.ddp and hasattr(trainer.train_loader, "sampler") and trainer.train_loader.sampler is not None:
             trainer.train_loader.sampler.set_epoch(epoch)
         if rank == 0:
@@ -313,16 +397,48 @@ def main_worker(args):
 
         trainer.train(epoch)
 
-        if epoch == 0 or (epoch > 200) or (epoch <= 200 and epoch % args.test_period == 0):
+        checkpoint_period = int(getattr(args, "checkpoint_period", 0))
+        should_checkpoint = (
+            checkpoint_period > 0
+            and epoch > 0
+            and epoch % checkpoint_period == 0
+        )
+        if rank == 0 and should_checkpoint:
+            checkpoint_path = os.path.join(
+                trainer.checkpoint_path, f"last_model_{epoch}.bin"
+            )
+            _save_stage_checkpoint(
+                trainer,
+                checkpoint_path,
+                epoch,
+                bool(getattr(args, "checkpoint_training_state", False)),
+            )
+            logger.info(f"Saved checkpoint: {checkpoint_path}")
+
+        if args.ddp and should_checkpoint:
+            dist.barrier()
+
+        should_evaluate = bool(getattr(args, "eval_during_train", True)) and (
+            epoch == 0
+            or epoch > 200
+            or (epoch <= 200 and epoch % args.test_period == 0)
+        )
+        if should_evaluate:
             if rank == 0:
-                fid = trainer.test(epoch)
-                is_best = (fid is not None) and (fid < getattr(trainer, "best_fid", float("inf")))
+                metrics = trainer.test(epoch)
+                fid = metrics["fgd"] if isinstance(metrics, dict) else metrics
+                is_best = (
+                    fid is not None
+                    and fid < getattr(trainer, "best_fid", float("inf"))
+                )
                 if is_best:
                     trainer.best_fid = fid
                     other_tools.save_checkpoints(
                         os.path.join(trainer.checkpoint_path, f"last_model_{epoch}.bin"),
                         trainer.model, opt=None, epoch=None, lrs=None
                     )
+            if args.ddp:
+                dist.barrier()
 
     if args.ddp:
         dist.barrier()

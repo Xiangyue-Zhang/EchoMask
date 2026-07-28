@@ -52,6 +52,16 @@ def parse_args():
     parser.add("--local-rank", type=int, help="local rank, will passed by ddp")
     parser.add("--num_workers", type=int, default="16")
     parser.add("--resume", type=str, default="")
+    parser.add("--resume_epoch", type=int, default=-1)
+    parser.add("--eval_during_train", default=True, type=str2bool)
+    parser.add("--checkpoint_period", type=int, default=0)
+    parser.add("--checkpoint_training_state", default=False, type=str2bool)
+    parser.add("--static_graph", default=False, type=str2bool)
+    parser.add("--tf32", default=False, type=str2bool)
+    parser.add("--max_train_steps", type=int, default=-1)
+    parser.add("--metrics_output", type=str, default="")
+    parser.add("--eval_epoch", type=int, default=42)
+    parser.add("--save_eval_npz", default=True, type=str2bool)
     parser.add("--lr", type=float, default="0.0001")
     parser.add("--sched_step", type=int, default="3000")
 
@@ -78,6 +88,7 @@ def parse_args():
     parser.add("--std_pose_path", default="/datasets/trinity/train/", type=str)
     # for pretrian weights
     parser.add("--data_path_1", default="../../datasets/checkpoints/", type=str)
+    parser.add("--pretrained_vq_dir", default="", type=str)
     # ------------------- evaluation ----------------------- #
     parser.add("--test_ckpt", default="/datasets/beat_cache/beat_4english_15_141/last.bin")
     parser.add("--eval_model", default="vae", type=str)

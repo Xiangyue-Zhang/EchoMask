@@ -2,6 +2,7 @@ import train
 import os
 import time
 import csv
+import json
 import sys
 import warnings
 import random
@@ -25,7 +26,6 @@ from dataloaders.data_tools import joints_list
 import librosa
 import pickle
 from torch.cuda.amp import GradScaler, autocast
-from timm.utils import ModelEma
 import torch.nn.parallel as tnp
 import torch.distributed as dist
 scaler = GradScaler()
@@ -43,6 +43,7 @@ class CustomTrainer(train.BaseTrainer):
     def __init__(self, args):
         super().__init__(args)
         self.args = args
+        self.scaler = scaler
         self.now_epoch = 0
         self.best_fid = 1e9
         self.joints = self.train_data.joints
@@ -120,6 +121,10 @@ class CustomTrainer(train.BaseTrainer):
         vq_model_module = __import__(f"models.motion_representation",
                                      fromlist=["something"])
         rvq_model_module = __import__(f"models.rvq", fromlist=["something"])
+        pretrained_vq_dir = (
+            self.args.pretrained_vq_dir
+            or os.path.join(self.args.data_path_1, "pretrained_vq")
+        )
         self.args.vae_layer = 2
         self.args.vae_length = 256
         self.args.vae_test_dim = 106  # face
@@ -130,7 +135,7 @@ class CustomTrainer(train.BaseTrainer):
 
         other_tools.load_checkpoints(
             self.vq_model_face,
-            self.args.data_path_1 + "pretrained_vq/rvq_face_600.bin",
+            os.path.join(pretrained_vq_dir, "rvq_face_600.bin"),
             args.e_name)
         # other_tools.load_checkpoints(self.vq_model_face, self.args.data_path_1 +  "pretrained_vq/crf_8_256.bin", args.e_name)
 
@@ -144,7 +149,7 @@ class CustomTrainer(train.BaseTrainer):
 
         other_tools.load_checkpoints(
             self.vq_model_upper,
-            self.args.data_path_1 + "pretrained_vq/rvq_upper_500.bin",
+            os.path.join(pretrained_vq_dir, "rvq_upper_500.bin"),
             args.e_name)
         # other_tools.load_checkpoints(self.vq_model_upper, self.args.data_path_1 +  "pretrained_vq/cru_8_256.bin", args.e_name)
 
@@ -157,7 +162,7 @@ class CustomTrainer(train.BaseTrainer):
         # other_tools.load_checkpoints(self.vq_model_hands, self.args.data_path_1 +  "pretrained_vq/rvq_hands_600_all.bin", args.e_name)
         other_tools.load_checkpoints(
             self.vq_model_hands,
-            self.args.data_path_1 + "pretrained_vq/rvq_hands_500.bin",
+            os.path.join(pretrained_vq_dir, "rvq_hands_500.bin"),
             args.e_name)
         # other_tools.load_checkpoints(self.vq_model_hands, self.args.data_path_1 +  "pretrained_vq/crh_8_256.bin", args.e_name)
 
@@ -171,7 +176,7 @@ class CustomTrainer(train.BaseTrainer):
         # other_tools.load_checkpoints(self.vq_model_lower, self.args.data_path_1 +  "pretrained_vq/rvq_lower_1100_all.bin", args.e_name)
         other_tools.load_checkpoints(
             self.vq_model_lower,
-            self.args.data_path_1 + "pretrained_vq/rvq_lower_600.bin",
+            os.path.join(pretrained_vq_dir, "rvq_lower_600.bin"),
             args.e_name)
         # other_tools.load_checkpoints(self.vq_model_lower, self.args.data_path_1 +  "pretrained_vq/crl_8_256.bin", args.e_name)
 
@@ -183,7 +188,7 @@ class CustomTrainer(train.BaseTrainer):
                                      "VAEConvZero")(self.args).to(self.rank)
         other_tools.load_checkpoints(
             self.global_motion,
-            self.args.data_path_1 + "pretrained_vq/last_1700_foot.bin",
+            os.path.join(pretrained_vq_dir, "last_1700_foot.bin"),
             args.e_name)
         # other_tools.load_checkpoints(self.global_motion, self.args.data_path_1 +  "pretrained_vq/foot_1600.bin", args.e_name)
 
@@ -812,12 +817,22 @@ class CustomTrainer(train.BaseTrainer):
                         g_loss_final = self._g_training(loaded_data, use_adv, 'train', epoch)
                         if not torch.is_tensor(g_loss_final):
                             g_loss_final = torch.tensor(g_loss_final, device=self.device, dtype=torch.float32)
+                        if not torch.isfinite(g_loss_final):
+                            raise FloatingPointError(
+                                f"non-finite training loss at epoch={epoch}, step={its}: "
+                                f"{g_loss_final.detach().item()}"
+                            )
                         loss = g_loss_final / accum_steps
                     scaler.scale(loss).backward()
                 else:
                     g_loss_final = self._g_training(loaded_data, use_adv, 'train', epoch)
                     if not torch.is_tensor(g_loss_final):
                         g_loss_final = torch.tensor(g_loss_final, device=self.device, dtype=torch.float32)
+                    if not torch.isfinite(g_loss_final):
+                        raise FloatingPointError(
+                            f"non-finite training loss at epoch={epoch}, step={its}: "
+                            f"{g_loss_final.detach().item()}"
+                        )
                     loss = g_loss_final / accum_steps
                     loss.backward()
 
@@ -860,15 +875,19 @@ class CustomTrainer(train.BaseTrainer):
 
             if self.args.debug and its >= 1:
                 break
+            if self.args.max_train_steps > 0 and its + 1 >= self.args.max_train_steps:
+                break
 
         self.opt_s.step(epoch)
 
     def test(self, epoch):
 
         results_save_path = self.checkpoint_path + f"/{epoch}/"
-        if os.path.exists(results_save_path):
-            return 0
-        os.makedirs(results_save_path)
+        metrics_path = os.path.join(results_save_path, "metrics.json")
+        if os.path.isfile(metrics_path):
+            with open(metrics_path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+        os.makedirs(results_save_path, exist_ok=True)
         start_time = time.time()
         total_length = 0
         test_seq_list = self.test_data.selected_file
@@ -1041,46 +1060,50 @@ class CustomTrainer(train.BaseTrainer):
                     bs * n, 100)
                 tar_trans_np = tar_trans.detach().cpu().numpy().reshape(
                     bs * n, 3)
-                gt_npz = np.load(self.args.data_path + self.args.pose_rep +
-                                 "/" + test_seq_list.iloc[its]['id'] + ".npz",
-                                 allow_pickle=True)
-                np.savez(
-                    results_save_path + "gt_" + test_seq_list.iloc[its]['id'] +
-                    '.npz',
-                    betas=gt_npz["betas"],
-                    poses=tar_pose_np,
-                    expressions=tar_exp_np,
-                    trans=tar_trans_np,
-                    model='smplx2020',
-                    gender='neutral',
-                    mocap_frame_rate=30,
-                )
-                np.savez(
-                    results_save_path + "res_" +
-                    test_seq_list.iloc[its]['id'] + '.npz',
-                    betas=gt_npz["betas"],
-                    poses=rec_pose_np,
-                    expressions=rec_exp_np,
-                    trans=rec_trans_np,
-                    model='smplx2020',
-                    gender='neutral',
-                    mocap_frame_rate=30,
-                )
-                # total_length += n
-                np.savez(
-                    results_save_path + "sem_face_" +
-                    test_seq_list.iloc[its]['id'] + '.npz',
-                    betas=gt_npz["betas"],
-                    poses=rec_pose_np - rec_pose_np,
-                    expressions=rec_exp_np,
-                    trans=rec_trans_np - rec_trans_np,
-                    model='smplx2020',
-                    gender='neutral',
-                    mocap_frame_rate=30,
-                )
+                if self.args.save_eval_npz:
+                    gt_npz = np.load(
+                        self.args.data_path + self.args.pose_rep + "/" +
+                        test_seq_list.iloc[its]['id'] + ".npz",
+                        allow_pickle=True,
+                    )
+                    np.savez(
+                        results_save_path + "gt_" +
+                        test_seq_list.iloc[its]['id'] + '.npz',
+                        betas=gt_npz["betas"],
+                        poses=tar_pose_np,
+                        expressions=tar_exp_np,
+                        trans=tar_trans_np,
+                        model='smplx2020',
+                        gender='neutral',
+                        mocap_frame_rate=30,
+                    )
+                    np.savez(
+                        results_save_path + "res_" +
+                        test_seq_list.iloc[its]['id'] + '.npz',
+                        betas=gt_npz["betas"],
+                        poses=rec_pose_np,
+                        expressions=rec_exp_np,
+                        trans=rec_trans_np,
+                        model='smplx2020',
+                        gender='neutral',
+                        mocap_frame_rate=30,
+                    )
+                    np.savez(
+                        results_save_path + "sem_face_" +
+                        test_seq_list.iloc[its]['id'] + '.npz',
+                        betas=gt_npz["betas"],
+                        poses=rec_pose_np - rec_pose_np,
+                        expressions=rec_exp_np,
+                        trans=rec_trans_np - rec_trans_np,
+                        model='smplx2020',
+                        gender='neutral',
+                        mocap_frame_rate=30,
+                    )
                 total_length += n
-        logger.info(f"l2 loss: {l2_all/total_length}")
-        logger.info(f"lvel loss: {lvel/total_length}")
+        mse = l2_all / total_length
+        lvd = lvel / total_length
+        logger.info(f"l2 loss: {mse}")
+        logger.info(f"lvel loss: {lvd}")
 
         latent_out_all = np.concatenate(latent_out, axis=0)
         latent_ori_all = np.concatenate(latent_ori, axis=0)
@@ -1103,7 +1126,22 @@ class CustomTrainer(train.BaseTrainer):
         logger.info(
             f"total inference time: {int(end_time)} s for {int(total_length/self.args.pose_fps)} s motion"
         )
-        return fid
+        metrics = {
+            "epoch": int(epoch),
+            "fgd": float(fid),
+            "bc": float(align_avg),
+            "diversity": float(l1div),
+            "mse": float(mse),
+            "lvd": float(lvd),
+            "motion_seconds": float(total_length / self.args.pose_fps),
+            "inference_seconds": float(end_time),
+        }
+        tmp_metrics_path = f"{metrics_path}.tmp.{os.getpid()}"
+        with open(tmp_metrics_path, "w", encoding="utf-8") as handle:
+            json.dump(metrics, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(tmp_metrics_path, metrics_path)
+        return metrics
 
     
     def inference(self, audio_path):
