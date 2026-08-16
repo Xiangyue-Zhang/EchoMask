@@ -5,7 +5,11 @@
 <p align="center">
   <strong>✨ACM MM 2025✨</strong>
 </p>
-<a href='https://arxiv.org/abs/2504.09209'><img src='https://img.shields.io/badge/ArXiv-2504.09209-red'></a> <a href='https://xiangyue-zhang.github.io/EchoMask/'><img src='https://img.shields.io/badge/Project-Page-purple'></a>
+<a href='https://arxiv.org/abs/2504.09209'><img src='https://img.shields.io/badge/ArXiv-2504.09209-red'></a> <a href='https://huggingface.co/papers/2504.09209'><img src='https://img.shields.io/badge/Hugging_Face-Paper-yellow'></a> <a href='https://xiangyuezhang.com/EchoMask/'><img src='https://img.shields.io/badge/Project-Page-purple'></a> <a href='https://huggingface.co/X-Zhang/EchoMask'><img src='https://img.shields.io/badge/%F0%9F%A4%97-Model_Weights-yellow'></a> <a href='https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data'><img src='https://img.shields.io/badge/%F0%9F%A4%97-Inference_Data-yellow'></a>
+
+<p><strong>Official implementation and checkpoints for speech-conditioned holistic co-speech gesture generation with mask modeling.</strong></p>
+
+<p><sub>Keywords: co-speech gesture generation, co-speech motion generation, speech-driven motion generation, masked modeling, BEAT2, and SMPL-X.</sub></p>
 
 <img src="src/f1.png" alt="EchoMask teaser" style="width:100%;"><br>
 <img src="src/previous.png" alt="Motivation" style="width:50%;"><br>
@@ -24,10 +28,12 @@
 The two releases use different training protocols and are provided separately:
 
 - **Speaker 2 (paper protocol):** download the original test `.npz` files from
-  [Google Drive](https://drive.google.com/file/d/1MZQMWf4Vk4DDK73U_WIamDwIeBRzR4Tc/view?usp=sharing).
+  [Hugging Face](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_testnpz.zip)
+  or [Google Drive](https://drive.google.com/file/d/1MZQMWf4Vk4DDK73U_WIamDwIeBRzR4Tc/view?usp=sharing).
 - **All Speakers (25 English BEAT2 speakers):** download the paired test
   `.npz` files from
-  [Google Drive](https://drive.google.com/file/d/1AoOQ-uqqrvlXhvQVX4aC-by5tCApXsjT/view?usp=sharing).
+  [Hugging Face](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_all_speakers_results_npz_25spk.zip)
+  or [Google Drive](https://drive.google.com/file/d/1AoOQ-uqqrvlXhvQVX4aC-by5tCApXsjT/view?usp=sharing).
 
 # 📊 Results
 
@@ -79,9 +85,11 @@ huggingface-cli download --resume-download facebook/hubert-large-ls960-ft --loca
 Choose the weights that match the intended protocol:
 
 - **Speaker 2 (paper protocol):** download the
-  [original pretrained models and weights](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing).
+  [original pretrained models and weights from Hugging Face](https://huggingface.co/X-Zhang/EchoMask/resolve/main/weights_echomask.zip)
+  ([Google Drive mirror](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing)).
 - **All Speakers (25 English BEAT2 speakers):** download the
-  [All-Speaker representation models and EchoMask checkpoint](https://drive.google.com/file/d/1TXnR7nNn7_2q_sIXkW-yihYpzTLpES1j/view?usp=sharing).
+  [All-Speaker representation models and EchoMask checkpoint from Hugging Face](https://huggingface.co/X-Zhang/EchoMask/resolve/main/EchoMask_all_speakers_weights_25spk.zip)
+  ([Google Drive mirror](https://drive.google.com/file/d/1TXnR7nNn7_2q_sIXkW-yihYpzTLpES1j/view?usp=sharing)).
   The five representation checkpoints are byte-identical to the verified
   SemTalk All-Speaker suite; EchoMask reuses them and trains only its own
   generation network. Keep the original archive's evaluator, projection

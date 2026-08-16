@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: "If you use EchoMask, please cite the ACM Multimedia 2025 paper."
+title: "EchoMask: Official Implementation"
+type: software
+authors:
+  - family-names: Zhang
+    given-names: Xiangyue
+  - family-names: Li
+    given-names: Jianfang
+  - family-names: Zhang
+    given-names: Jiaxu
+repository-code: "https://github.com/Xiangyue-Zhang/EchoMask"
+url: "https://xiangyuezhang.com/EchoMask/"
+abstract: "Official code and checkpoints for speech-conditioned holistic co-speech gesture generation with attention-based mask modeling."
+keywords:
+  - co-speech gesture generation
+  - co-speech motion generation
+  - speech-driven motion generation
+  - masked modeling
+  - BEAT2
+  - SMPL-X
+preferred-citation:
+  type: conference-paper
+  title: "EchoMask: Speech-Queried Attention-based Mask Modeling for Holistic Co-Speech Motion Generation"
+  authors:
+    - family-names: Zhang
+      given-names: Xiangyue
+    - family-names: Li
+      given-names: Jianfang
+    - family-names: Zhang
+      given-names: Jiaxu
+    - family-names: Ren
+      given-names: Jianqiang
+    - family-names: Bo
+      given-names: Liefeng
+    - family-names: Tu
+      given-names: Zhigang
+  collection-title: "Proceedings of the 33rd ACM International Conference on Multimedia"
+  year: 2025
+  start: 10827
+  end: 10836
+  doi: "10.1145/3746027.3754847"
+  url: "https://arxiv.org/abs/2504.09209"
