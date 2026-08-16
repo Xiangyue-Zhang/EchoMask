@@ -85,7 +85,7 @@ huggingface-cli download --resume-download facebook/hubert-large-ls960-ft --loca
 Choose the weights that match the intended protocol:
 
 - **Speaker 2 (paper protocol):** download the
-  [original pretrained models and weights from Hugging Face](https://huggingface.co/X-Zhang/EchoMask/resolve/main/weights_echomask.zip)
+  [original pretrained models and weights from Hugging Face](https://huggingface.co/X-Zhang/EchoMask/resolve/main/weights_echomask_no_smplx.zip)
   ([Google Drive mirror](https://drive.google.com/file/d/1nQqkHT27avQl_YoecHc8gBVuF_0aP5Bb/view?usp=sharing)).
 - **All Speakers (25 English BEAT2 speakers):** download the
   [All-Speaker representation models and EchoMask checkpoint from Hugging Face](https://huggingface.co/X-Zhang/EchoMask/resolve/main/EchoMask_all_speakers_weights_25spk.zip)
@@ -94,6 +94,10 @@ Choose the weights that match the intended protocol:
   SemTalk All-Speaker suite; EchoMask reuses them and trains only its own
   generation network. Keep the original archive's evaluator, projection
   matrix, and SMPL-X assets in `weights/`.
+
+The Hugging Face archives exclude `SMPLX_NEUTRAL_2020.npz`. Download SMPL-X
+from the [official website](https://smpl-x.is.tue.mpg.de/) under its own
+license and place it in the path expected by the repository.
 
 Keep the original Speaker 2 archive in its documented locations. Install the
 All-Speaker archive without overwriting those files:
