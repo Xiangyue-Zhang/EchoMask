@@ -25,15 +25,14 @@
 
 # 💖 Inference Data
 
-The two releases use different training protocols and are provided separately:
+Compare EchoMask on BEAT2 without rerunning generation. Each download includes predictions and matched ground-truth motion at 30 fps.
 
-- **Speaker 2 (paper protocol):** download the original test `.npz` files from
-  [Hugging Face](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_testnpz.zip)
-  or [Google Drive](https://drive.google.com/file/d/1MZQMWf4Vk4DDK73U_WIamDwIeBRzR4Tc/view?usp=sharing).
-- **All Speakers (25 English BEAT2 speakers):** download the paired test
-  `.npz` files from
-  [Hugging Face](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_all_speakers_results_npz_25spk.zip)
-  or [Google Drive](https://drive.google.com/file/d/1AoOQ-uqqrvlXhvQVX4aC-by5tCApXsjT/view?usp=sharing).
+| BEAT2 protocol | Prediction / GT pairs | Download |
+| --- | ---: | --- |
+| Speaker 2 (Scott) | 15 | [Predictions and ground truth](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_speaker2_predictions_and_gt.zip) |
+| 25 English speakers | 265 | [Predictions and ground truth](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_all_speakers_results_npz_25spk.zip) |
+
+Both paired downloads use `res_<id>.npz` for predictions and `gt_<id>.npz` for ground truth. The [original Speaker 2 download](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data/resolve/main/EchoMask_testnpz.zip) contains 15 predictions and zero GT files. The [dataset card](https://huggingface.co/datasets/X-Zhang/EchoMask-Inference-Data) documents the sources and checksums.
 
 # 📊 Results
 
@@ -235,7 +234,7 @@ Thanks to [EMAGE](https://github.com/PantoMatrix/PantoMatrix/tree/main/scripts/E
 
 # 📖 Citation
 
-If you find our code or paper helps, please consider citing:
+The ACM Multimedia proceedings DOI is [10.1145/3746027.3754847](https://doi.org/10.1145/3746027.3754847).
 
 ```bibtex
 @inproceedings{zhang2025echomask,
@@ -243,6 +242,35 @@ If you find our code or paper helps, please consider citing:
   author={Zhang, Xiangyue and Li, Jianfang and Zhang, Jiaxu and Ren, Jianqiang and Bo, Liefeng and Tu, Zhigang},
   booktitle={Proceedings of the 33rd ACM International Conference on Multimedia},
   pages={10827--10836},
+  doi={10.1145/3746027.3754847},
   year={2025}
 }
 ```
+
+# Positioning and Related Work
+
+[EchoMask](https://arxiv.org/abs/2504.09209) studies speech-conditioned
+masked modeling for holistic co-speech gesture generation. Its motion-audio
+alignment module maps speech and motion into a joint latent space and learns
+speech queries aligned with motion. Speech-queried attention then scores
+motion frames and selects high-attention frames for masking. The aligned
+speech features also condition the generation network. The design connects
+the masking decision to speech rhythm and semantic content.
+
+[EMAGE](https://arxiv.org/abs/2401.00374) provides a related masked-modeling
+approach through joint audio-to-gesture generation and masked gesture
+reconstruction. EchoMask focuses on how motion-aligned speech features guide
+which frames are masked. [SemTalk](https://arxiv.org/abs/2412.16563) addresses
+frame-level semantic emphasis through separately learned base and sparse
+motions with adaptive fusion.
+[GestureLSM](https://arxiv.org/abs/2501.18898) instead emphasizes interactions
+among tokenized body regions and latent shortcut sampling. These comparisons
+describe the methods' mechanisms, without assuming a shared evaluation
+protocol or ranking their results across different settings.
+
+For BEAT2 experiments, use weights and outputs from the same release. The
+original Speaker 2 paper protocol and the later 25-speaker release are not a
+controlled single-speaker versus multi-speaker ablation. See the
+[all-speaker workflow](scripts/all_speakers/README.md) and
+[released metrics and checkpoint metadata](results/all_speakers/best_run.json)
+for the separate release's setup and checkpoint selection.
